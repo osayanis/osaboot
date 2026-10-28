@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         buildMenu()
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 560),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: ContentView.size.width, height: ContentView.size.height),
                           styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
         window.title = "OsaBoot"
@@ -15,8 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
         window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = NSColor(red: 0.05, green: 0.045, blue: 0.07, alpha: 1)
-        window.contentView = NSHostingView(rootView: ContentView(model: model, flasher: model.flasher))
+        window.backgroundColor = NSColor(red: 0.035, green: 0.035, blue: 0.045, alpha: 1)
+        // la vue SwiftUI dessine aussi sous la barre de titre : la fenêtre entière fait ContentView.size
+        let host = NSHostingView(rootView: ContentView(model: model, flasher: model.flasher, drives: model.drives))
+        host.sizingOptions = []
+        window.contentView = host
         window.delegate = self
         window.center()
         window.setFrameAutosaveName("OsaBoot")
@@ -30,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let p = env["OSABOOT_PREVIEW"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [model] in
                 switch p {
+                case "confirm": model.flash()
                 case "working": model.flasher.preview(.running)
                 case "done": model.flasher.preview(.done("Branche la clé sur le PC, allume-le et choisis-la au démarrage (F12, F11, F8 ou Échap selon la marque)."))
                 case "failed": model.flasher.preview(.failed("La vérification a échoué : la clé ne contient pas exactement l'image. Elle est peut-être abîmée ou contrefaite."))
@@ -89,5 +93,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func checkUpdates() { Updater.shared.checkNow() }
     @objc private func openImage() { model.pickImage() }
-    @objc private func pickDrive() { if !model.flasher.running { model.picking = true } }
+    @objc private func pickDrive() { model.chooseDrive() }
 }

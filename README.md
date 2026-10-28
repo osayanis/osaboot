@@ -50,7 +50,7 @@ OSABOOT_TEST_DISKS=${D#/dev/} $B flash test.img ${D#/dev/} --no-eject
 OSABOOT_TEST_DISKS=${D#/dev/} OSABOOT_SPLIT_AT=10000000 $B flash win.iso ${D#/dev/}   # force la découpe
 ```
 
-`OSABOOT_TEST_DISKS=disk14 OSABOOT_IMAGE=win.iso open OsaBoot.app` ouvre l'interface en mode test.
+`OSABOOT_TEST_DISKS=disk14 OSABOOT_IMAGE=win.iso open OsaBoot.app` ouvre l'interface en mode test. `OSABOOT_PREVIEW=confirm|working|done|failed` affiche directement un état (captures d'écran).
 
 ## Licences
 Le code d'OsaBoot est public. L'app embarque **wimlib-imagex** ([wimlib](https://wimlib.net), GPLv3, © Eric Biggers), lancé comme programme séparé ; sa licence est copiée dans l'app (`Contents/Resources/wimlib-LICENCE-GPLv3.txt`) et sa source est sur wimlib.net.
