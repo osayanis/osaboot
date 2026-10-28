@@ -24,6 +24,8 @@ final class AppModel: ObservableObject {
     @Published var options = FlashOptions()
     @Published var confirming = false
     @Published var choosingDrive = false
+    /// Mode démo (captures) : une fausse ISO et une fausse clé, rien ne peut être écrit.
+    var demo = false
     let drives = DriveList()
     let flasher = Flasher()
     private var bag = Set<AnyCancellable>()
@@ -31,7 +33,7 @@ final class AppModel: ObservableObject {
     init() {
         // la clé choisie a disparu ? on l'oublie. Une seule clé branchée ? on la choisit.
         drives.$drives.sink { [weak self] list in
-            guard let self, !self.flasher.running else { return }
+            guard let self, !self.flasher.running, !self.demo else { return }
             if let d = self.drive, !list.contains(d) { self.drive = list.first { $0.id == d.id && $0.size == d.size } }
             if self.drive == nil, list.count == 1, list[0].writable { self.drive = list[0] }
         }.store(in: &bag)
@@ -76,6 +78,7 @@ final class AppModel: ObservableObject {
     func confirmFlash() {
         guard canFlash, let image, let drive else { return }
         withAnimation(.easeOut(duration: 0.2)) { confirming = false }
+        if demo { return }
         flasher.start(image: image, drive: drive, options: options)
     }
 }
