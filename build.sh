@@ -45,12 +45,13 @@ PLIST
 # wimlib-imagex (découpe d'install.wim), compilé par scripts/build-wimlib.sh, avec sa licence
 if [ -x vendor/wimlib-imagex ]; then
   cp vendor/wimlib-imagex "$APP/Contents/Resources/wimlib-imagex"
+  [ -f vendor/libwim.15.dylib ] && cp vendor/libwim.15.dylib "$APP/Contents/Resources/libwim.15.dylib"
   cp vendor/wimlib-COPYING.GPLv3 "$APP/Contents/Resources/wimlib-LICENCE-GPLv3.txt"
 fi
 
 # Certificat « Apple Development » du trousseau s'il existe (les permissions
 # macOS restent accordées d'un build à l'autre), sinon signature ad-hoc.
 SIGN_ID="${SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/{print $2; exit}')}"
-[ -f "$APP/Contents/Resources/wimlib-imagex" ] && codesign --force --sign "${SIGN_ID:--}" "$APP/Contents/Resources/wimlib-imagex" 2>/dev/null
+for f in "$APP/Contents/Resources/libwim.15.dylib" "$APP/Contents/Resources/wimlib-imagex"; do [ -f "$f" ] && codesign --force --sign "${SIGN_ID:--}" "$f" 2>/dev/null; done
 codesign --force --deep --sign "${SIGN_ID:--}" "$APP" 2>/dev/null || true
 echo "✅ $APP prêt."
