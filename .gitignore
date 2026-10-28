@@ -1,0 +1,6 @@
+.build/
+*.app
+*.dmg
+*.zip
+vendor/wimlib-imagex
+.DS_Store
