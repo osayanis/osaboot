@@ -4,3 +4,4 @@
 *.zip
 vendor/wimlib-imagex
 .DS_Store
+vendor/libwim.15.dylib
