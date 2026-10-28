@@ -30,6 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Updater.shared.startAutomaticChecks()
         let env = ProcessInfo.processInfo.environment
         if let img = env["OSABOOT_IMAGE"] { model.open(URL(fileURLWithPath: img)) }
+        if env["OSABOOT_DEMO"] != nil {
+            model.demo = true
+            model.image = SourceImage(url: URL(fileURLWithPath: "/Win11_25H2_French_x64.iso"), size: 7_340_000_000,
+                                      kind: .windows(.init(label: "CCCOMA_X64FRE_FR-FR_DV9", install: "install.wim",
+                                                           installSize: 6_210_000_000, totalSize: 7_290_000_000, arch: "x64")))
+            model.drive = Drive(id: "demo", name: "SanDisk Ultra", size: 32_010_000_000, bus: "USB", volumes: ["CLÉ PERSO"], writable: true, virtual: false)
+        }
         if let p = env["OSABOOT_PREVIEW"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [model] in
                 switch p {
