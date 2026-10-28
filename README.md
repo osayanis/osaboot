@@ -4,7 +4,7 @@ Une image, une clé USB, et c'est parti. **Même pour Windows.**
 
 OsaBoot fait ce que fait balenaEtcher (copier une image `.iso` ou `.img` sur une clé et vérifier le résultat), et sait en plus préparer une **clé d'installation Windows** à partir d'une ISO officielle, ce qu'Etcher ne fait pas. App macOS native en SwiftUI, de la famille [OsaLabs](https://osalabs.fr).
 
-> **Statut : en test.** Tout est vérifié sur des disques de test (images disque en mémoire) ; le premier essai sur une vraie clé et un vrai PC reste à faire. Pas encore de version téléchargeable.
+> **Statut : en test.** Écriture brute (avec mot de passe via authopen et vérification SHA-256) et préparation d’une clé Windows vérifiées sur une vraie clé USB. Reste à démarrer un vrai PC sur une vraie ISO Windows. Pas encore de version téléchargeable.
 
 ## Ce que ça fait
 
