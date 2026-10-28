@@ -133,6 +133,8 @@ final class Engine {
         if r.status != 0 { r = try Shell.runAsAdmin("/usr/sbin/diskutil", ["eraseDisk", "MS-DOS", "OSABOOT", "MBR", drive.node]) }
         guard r.status == 0 else { throw Fail("Le formatage de la clé a échoué : \(r.err.trimmingCharacters(in: .whitespacesAndNewlines))") }
         let dest = try mountPoint(of: "\(drive.id)s1")
+        // Spotlight n'indexe pas la clé (sinon il y laisse un dossier .Spotlight-V100)
+        _ = try? Shell.run("/usr/bin/mdutil", ["-i", "off", dest.path])
 
         // 2. les fichiers, sauf install.wim s'il est trop gros
         let fm = FileManager.default
