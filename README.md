@@ -69,11 +69,14 @@ Sous le disque vide, **« ou crée une EraseKEY »**. OsaBoot télécharge [Shre
 - le menu de démarrage s’appelle **EraseKEY** et part au bout de 5 s ;
 - le clavier est en **AZERTY** dès le démarrage (option : QWERTY) ;
 - la clé elle-même est **retirée de la liste** des disques, elle ne peut pas s’effacer ;
-- un `LISEZMOI-EraseKEY.txt` en français est posé dessus.
+- un `LISEZMOI-EraseKEY.txt` en français est posé dessus ;
+- **l’écran d’effacement est celui d’OsaLabs** (dossier [`erasekey/`](erasekey/), en Go) à la place de celui de nwipe, avec la mascotte.
 
-Sur le PC : démarrer sur la clé (F12, F11, F8 ou Échap), cocher le disque avec **Espace**, lancer avec **Majuscule + S**. Plusieurs méthodes (aléatoire vérifié par défaut, zéros, DoD, Gutmann…), et **E** pour l’effacement intégré au disque (Secure Erase), plus complet sur les SSD et NVMe. À la fin, **Entrée** enregistre sur la clé le journal et un rapport PDF par disque effacé.
+Sur le PC : démarrer sur la clé (F12, F11, F8 ou Échap). L’écran EraseKEY liste les disques du PC (modèle, taille, type, numéro de série ; la clé est affichée « protégée »). On choisit le disque, la méthode (**Conseillée** : aléatoire, remise à zéro, relecture ; **Rapide** : zéros, relecture ; **Renforcée** : 3 passes DoD), on tape **EFFACER**, et on suit l’avancement. À la fin, le journal et un rapport PDF par disque sont enregistrés sur la clé ; **E** éteint le PC, **R** le redémarre. La console Alt+F2 garde nwipe, hdparm et nvme-cli pour les réglages avancés.
 
-<p align="center"><img src=".github/assets/erasekey.png" width="420" alt="OsaBoot prêt à créer une EraseKEY"> <img src=".github/assets/erasekey-nwipe.png" width="420" alt="nwipe sur une EraseKEY : seul le disque du PC est proposé"></p>
+<p align="center"><img src=".github/assets/erasekey.png" width="420" alt="OsaBoot prêt à créer une EraseKEY"> <img src=".github/assets/erasekey-ui.png" width="420" alt="L'écran EraseKEY sur le PC : seul le disque du PC est proposé"></p>
+
+**Comment l’écran est ajouté sans recompiler ShredOS** : `erasekey/build-overlay.sh` construit un petit initrd (cpio) avec l’interface et le lanceur de ShredOS retouché (il lance `osa-erase` au lieu de l’écran de nwipe). GRUB le charge après le noyau (`initrd /boot/osa.cpio.gz`) et ses fichiers remplacent ceux de ShredOS au démarrage. L’effacement lui-même reste fait par nwipe, en mode automatique (`--autonuke --nogui` sur le seul disque choisi). La version de ShredOS est figée sur celle testée (`v2025.11_32_x86-64_0.43.1`). `OSA_DEMO=1 osa-erase` montre l’interface avec de faux disques.
 
 ## 🛡️ Sécurité
 
@@ -132,7 +135,7 @@ Pour voir l’EraseKEY démarrer : `qemu-system-x86_64 -m 1024 -drive if=none,id
 | Écrire | `/dev/rdiskN` ouvert directement, sinon par `/usr/libexec/authopen` (le descripteur revient par un socket Unix). Blocs de 4 Mo, puis `F_FULLFSYNC`. |
 | Vérifier | Relecture complète et SHA-256 (CryptoKit) comparé à celui de l’image. |
 | Clé Windows | `diskutil eraseDisk MS-DOS OSABOOT MBR`, Spotlight coupé sur la clé (`mdutil -i off`), copie par blocs de 8 Mo, `wimlib-imagex split` si besoin, nettoyage des fichiers `._*` de macOS, éjection. |
-| EraseKEY | Dernière release ShredOS via l’API GitHub (image `x86-64 … _lite.img` + `.sha1`), cache dans `~/Library/Caches/com.osalabs.osaboot/EraseKEY`. La copie est attachée sans montage (`hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount`), sa partition FAT montée par `diskutil mount`, les deux `grub.cfg` (BIOS et UEFI) réécrits (`loadkeys=fr shredos_exclude_boot_disc="yes"`), `/etc/shredos/shredos_exclude_disc` ajouté, puis écriture brute vérifiée comme une image normale. |
+| EraseKEY | Release ShredOS figée (`v2025.11_32_x86-64_0.43.1`) via l’API GitHub (image `x86-64 … _lite.img` + `.sha1`), cache dans `~/Library/Caches/com.osalabs.osaboot/EraseKEY`. La copie est attachée sans montage (`hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount`), sa partition FAT montée par `diskutil mount`, les deux `grub.cfg` (BIOS et UEFI) réécrits (`loadkeys=fr shredos_exclude_boot_disc="yes"`), `/etc/shredos/shredos_exclude_disc` ajouté, `boot/osa.cpio.gz` (interface Go compilée pour Linux x86-64, statique) ajouté avec sa ligne `initrd`, puis écriture brute vérifiée comme une image normale. |
 | Interface | SwiftUI, `keyframeAnimator` pour les sauts de la mascotte, `TimelineView` + `Canvas` en pause hors écriture. |
 
 ## ⚠️ Limites
@@ -144,7 +147,7 @@ Pour voir l’EraseKEY démarrer : `qemu-system-x86_64 -m 1024 -drive if=none,id
 
 ## 📄 Licences
 
-Le code d’OsaBoot est public. L’EraseKEY télécharge **ShredOS** (GPLv2, © PartialVolume et contributeurs, avec nwipe) depuis ses releases officielles : OsaBoot ne l’embarque pas et ne modifie que la configuration du menu de démarrage. L’app embarque **wimlib-imagex** ([wimlib](https://wimlib.net), GPLv3, © Eric Biggers), lancé comme programme séparé ; sa licence est copiée dans l’app (`Contents/Resources/wimlib-LICENCE-GPLv3.txt`) et sa source est sur wimlib.net.
+Le code d’OsaBoot est public. L’EraseKEY télécharge **ShredOS** (GPLv2, © PartialVolume et contributeurs, avec nwipe) depuis ses releases officielles : OsaBoot ne l’embarque pas ; il retouche le menu de démarrage et ajoute son interface (code dans `erasekey/`) avec une copie modifiée du lanceur `nwipe_launcher` de ShredOS (GPLv2, modification : la ligne qui lance nwipe). L’app embarque **wimlib-imagex** ([wimlib](https://wimlib.net), GPLv3, © Eric Biggers), lancé comme programme séparé ; sa licence est copiée dans l’app (`Contents/Resources/wimlib-LICENCE-GPLv3.txt`) et sa source est sur wimlib.net.
 
 ---
 

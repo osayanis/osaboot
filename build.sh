@@ -49,6 +49,14 @@ if [ -x vendor/wimlib-imagex ]; then
   cp vendor/wimlib-COPYING.GPLv3 "$APP/Contents/Resources/wimlib-LICENCE-GPLv3.txt"
 fi
 
+# EraseKEY : l'interface d'effacement (Go) ajoutée à ShredOS, voir erasekey/build-overlay.sh
+if command -v go >/dev/null; then
+  ./erasekey/build-overlay.sh build/erasekey-overlay.cpio.gz >/dev/null
+  cp build/erasekey-overlay.cpio.gz "$APP/Contents/Resources/erasekey-overlay.cpio.gz"
+else
+  echo "⚠️  Go absent : l'EraseKEY utilisera l'écran de nwipe (brew install go)."
+fi
+
 # Certificat « Apple Development » du trousseau s'il existe (les permissions
 # macOS restent accordées d'un build à l'autre), sinon signature ad-hoc.
 SIGN_ID="${SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/{print $2; exit}')}"

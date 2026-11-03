@@ -14,6 +14,17 @@ import CryptoKit
 // - un mode d'emploi en français est posé à la racine.
 enum EraseKey {
     static let repo = "PartialVolume/shredos.x86_64"
+    /// Version de ShredOS testée avec l'interface EraseKEY (son lanceur est retouché par
+    /// erasekey/build-overlay.sh, qui doit viser la même).
+    static let tag = "v2025.11_32_x86-64_0.43.1"
+
+    /// L'interface EraseKEY (erasekey/, Go) et le lanceur retouché, en initrd ajouté au noyau.
+    static var overlay: URL? {
+        let candidates = [Bundle.main.resourceURL?.appendingPathComponent("erasekey-overlay.cpio.gz"),
+                          Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("erasekey-overlay.cpio.gz"),
+                          URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/erasekey-overlay.cpio.gz")]
+        return candidates.compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
 
     struct Release { let version: String; let image: URL; let sha1: URL; let name: String; let size: Int64 }
 
@@ -26,7 +37,7 @@ enum EraseKey {
 
     /// La dernière version de ShredOS : l'image USB 64 bits « lite » et son empreinte.
     static func latest() async throws -> Release {
-        var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!)
+        var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(repo)/releases/tags/\(tag)")!)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("OsaBoot", forHTTPHeaderField: "User-Agent")
         req.timeoutInterval = 20
@@ -111,15 +122,18 @@ enum EraseKey {
         guard m.status == 0 else { throw Fail("Impossible de monter l'image de l'effaceur : \(m.err.trimmingCharacters(in: .whitespacesAndNewlines))") }
         defer { _ = try? Shell.run("/usr/sbin/diskutil", ["unmount", "force", mnt.path]) }
 
+        // l'interface EraseKEY ; sans elle (build de développement), c'est l'écran de nwipe
+        let ui = overlay
+        if let ui { try fm.copyItem(at: ui, to: mnt.appendingPathComponent("boot/osa.cpio.gz")) }
         for rel in ["boot/grub/grub.cfg", "EFI/BOOT/grub.cfg"] {
             let f = mnt.appendingPathComponent(rel)
             let original = try String(contentsOf: f, encoding: .utf8)
-            try grub(original, keyboard: keyboard).write(to: f, atomically: false, encoding: .utf8)
+            try grub(original, keyboard: keyboard, overlay: ui != nil).write(to: f, atomically: false, encoding: .utf8)
         }
         let etc = mnt.appendingPathComponent("etc/shredos", isDirectory: true)
         try fm.createDirectory(at: etc, withIntermediateDirectories: true)
         fm.createFile(atPath: etc.appendingPathComponent("shredos_exclude_disc").path, contents: Data())
-        try readme.write(to: mnt.appendingPathComponent("LISEZMOI-EraseKEY.txt"), atomically: false, encoding: .utf8)
+        try (ui != nil ? readme : readmeNwipe).write(to: mnt.appendingPathComponent("LISEZMOI-EraseKEY.txt"), atomically: false, encoding: .utf8)
         _ = try? Shell.run("/usr/sbin/dot_clean", ["-m", mnt.path])
         for junk in [".fseventsd", ".Spotlight-V100", ".Trashes"] { try? fm.removeItem(at: mnt.appendingPathComponent(junk)) }
         sync()
@@ -128,7 +142,7 @@ enum EraseKey {
 
     /// Le menu de démarrage adapté. Chaque ligne qui lance ShredOS reçoit les options ; s'il n'y
     /// en a aucune, le format a changé et on refuse plutôt que d'écrire une clé qui s'efface elle-même.
-    static func grub(_ cfg: String, keyboard: String) throws -> String {
+    static func grub(_ cfg: String, keyboard: String, overlay: Bool = false) throws -> String {
         let options = " loadkeys=\(keyboard) shredos_exclude_boot_disc=\"yes\""
         var launches = 0
         let lines = cfg.components(separatedBy: "\n").map { line -> String in
@@ -136,6 +150,11 @@ enum EraseKey {
             if l.contains("/boot/bzImage") {
                 launches += 1
                 l = l.replacingOccurrences(of: #"\s*loadkeys=\S+"#, with: "", options: .regularExpression) + options
+                // l'initrd d'OsaBoot, chargé après le système de ShredOS : ses fichiers priment
+                if overlay {
+                    let indent = String(l.prefix { $0 == " " || $0 == "\t" })
+                    l += "\n" + indent + "initrd /boot/osa.cpio.gz"
+                }
             }
             if l.trimmingCharacters(in: .whitespaces).hasPrefix("menuentry") {
                 l = l.replacingOccurrences(of: "ShredOS (nomodeset - display issues? try this)", with: "EraseKEY - ecran noir ? essaie celui-ci")
@@ -149,6 +168,36 @@ enum EraseKey {
     }
 
     static let readme = """
+    EraseKEY, fabriquée par OsaBoot
+    ================================
+
+    Cette clé démarre un PC sur un petit système dont le seul rôle est d'effacer
+    complètement un disque. Rien n'est installé ni réinstallé : le disque choisi est
+    entièrement réécrit, et ce qu'il contenait ne peut plus être récupéré.
+
+    1. Branche la clé sur le PC, allume-le et choisis-la au démarrage
+       (F12, F11, F8 ou Échap selon la marque). Si le Secure Boot bloque, désactive-le
+       dans le BIOS le temps de l'effacement.
+    2. L'écran EraseKEY s'ouvre tout seul et liste les disques du PC. Cette clé n'est
+       jamais proposée.
+    3. Flèches pour choisir le disque (Espace pour en cocher plusieurs), Entrée.
+    4. Choisis la méthode : Conseillée (aléatoire, remise à zéro, relecture),
+       Rapide (zéros, relecture) ou Renforcée (trois passes DoD).
+    5. Tape EFFACER pour confirmer. L'effacement peut durer de quelques minutes à
+       plusieurs heures : laisse le PC allumé et la clé branchée.
+    6. À la fin, le journal et un rapport PDF par disque sont enregistrés sur cette clé.
+       E éteint le PC, R le redémarre, Entrée pour effacer un autre disque.
+
+    Besoin des réglages avancés ? La console Alt+F2 donne accès à nwipe, hdparm et
+    nvme-cli (effacement intégré des SSD et NVMe).
+
+    Interface EraseKEY : OsaLabs (code public, github.com/osayanis/osaboot).
+    Système et moteur d'effacement : ShredOS et nwipe (licence GPL),
+    https://github.com/PartialVolume/shredos.x86_64
+    """
+
+    /// Mode d'emploi quand l'interface EraseKEY n'est pas incluse (écran de nwipe).
+    static let readmeNwipe = """
     EraseKEY, fabriquée par OsaBoot
     ================================
 
