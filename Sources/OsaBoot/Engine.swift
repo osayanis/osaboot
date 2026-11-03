@@ -55,7 +55,7 @@ final class Engine {
             _ = try? Shell.run("/usr/sbin/diskutil", ["eject", drive.node])
         }
         if image.eraseKey != nil {
-            return "Branche la clé sur le PC à effacer et démarre dessus (F12, F11, F8 ou Échap). Choisis le disque avec Espace, puis Majuscule + S. La clé ne s'efface jamais elle-même."
+            return "Branche la clé sur le PC à effacer et démarre dessus (F12, F11, F8 ou Échap). Choisis le disque, la méthode, puis tape EFFACER. La clé ne s'efface jamais elle-même."
         }
         return image.isWindows
             ? "Branche la clé sur le PC, allume-le et choisis-la au démarrage (F12, F11, F8 ou Échap selon la marque)."
@@ -68,6 +68,9 @@ final class Engine {
 
     private func flashRaw(_ url: URL) throws {
         onReport(Report(stage: "Préparation", done: 0, total: image.size))
+        // macOS ne doit rien monter sur la clé pendant la copie et la vérification
+        let blocker = MountBlocker(drive.id)
+        defer { withExtendedLifetime(blocker) {} }
         let un = try Shell.run("/usr/sbin/diskutil", ["unmountDisk", "force", drive.node])
         guard un.status == 0 else { throw Fail("Impossible de démonter la clé : \(un.err.trimmingCharacters(in: .whitespacesAndNewlines))") }
         let fd = try RawDisk.open(drive.rawNode)
@@ -79,12 +82,14 @@ final class Engine {
         let src = try FileHandle(forReadingFrom: url)
         defer { try? src.close() }
         var hasher = SHA256()
+        var chunks: [SHA256.Digest] = []   // empreinte de chaque morceau, pour dire où ça diffère
         var offset: Int64 = 0
         while true {
             try check()
             let data = try autoreleasepool { try src.read(upToCount: Self.chunk) ?? Data() }
             if data.isEmpty { break }
             hasher.update(data: data)
+            chunks.append(SHA256.hash(data: data))
             data.copyBytes(to: buf.assumingMemoryBound(to: UInt8.self), count: data.count)
             // un disque brut ne s'écrit que par blocs entiers : on complète la fin avec des zéros
             let len = (data.count + 4095) / 4096 * 4096
@@ -98,6 +103,7 @@ final class Engine {
 
         guard options.verify else { return }
         var readBack = SHA256()
+        var firstBad: Int64? = nil
         var pos: Int64 = 0
         while pos < image.size {
             try check()
@@ -110,12 +116,16 @@ final class Engine {
                 guard n > 0 else { throw Fail("Lecture de la clé impossible pendant la vérification.") }
                 got += n
             }
-            readBack.update(bufferPointer: UnsafeRawBufferPointer(start: buf, count: want))
+            let piece = UnsafeRawBufferPointer(start: buf, count: want)
+            readBack.update(bufferPointer: piece)
+            let i = Int(pos / Int64(Self.chunk))
+            if firstBad == nil, i < chunks.count, SHA256.hash(data: piece) != chunks[i] { firstBad = pos }
             pos += Int64(want)
             onReport(Report(stage: "Vérification", done: pos, total: image.size))
         }
         guard readBack.finalize() == expected else {
-            throw Fail("La vérification a échoué : la clé ne contient pas exactement l'image. Elle est peut-être abîmée ou contrefaite.")
+            let at = firstBad.map { " (première différence vers \($0.bytes))" } ?? ""
+            throw Fail("La vérification a échoué\(at) : la clé ne contient pas exactement l'image. Réessaie une fois ; si ça recommence, la clé est sans doute abîmée.")
         }
     }
 
