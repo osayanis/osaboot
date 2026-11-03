@@ -20,7 +20,7 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/root/usr/bin"
 
 command -v go >/dev/null || { echo "Go est nécessaire (brew install go)."; exit 1; }
-VERSION="$(cat ../VERSION 2>/dev/null || echo dev)"
+VERSION="$(sed -n "s/.*ShortVersionString<\/key><string>\([^<]*\).*/\1/p" ../build.sh)"; VERSION="${VERSION:-dev}"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$WORK/root/usr/bin/osa-erase" .
 
 LAUNCHER_URL="https://raw.githubusercontent.com/PartialVolume/shredos.x86_64/$SHREDOS_TAG/board/shredos/fsoverlay/usr/bin/nwipe_launcher"
