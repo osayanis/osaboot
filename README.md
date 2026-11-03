@@ -59,7 +59,21 @@ Fond noir, animations douces, et environ **2 % de CPU** au repos : les animation
 | 🪟 **Windows 10 / 11** | Une ISO Windows ne démarre pas si on la copie telle quelle. OsaBoot formate la clé en **FAT32 / MBR** (lisible au démarrage par tous les PC en UEFI) et y copie les fichiers. |
 | ✂️ **install.wim de plus de 4 Go** | FAT32 n’accepte pas les fichiers de plus de 4 Go : OsaBoot découpe `install.wim` en `install.swm`, `install2.swm`…, que l’installateur de Windows réunit tout seul. |
 | 🔓 **Windows 11 sans TPM** | En option, un `autounattend.xml` permet d’installer Windows 11 sur un PC **sans TPM 2.0 ni Secure Boot** (mêmes clés `LabConfig` que Rufus). |
+| 🧽 **EraseKEY** | Une clé qui **efface complètement un disque**, sans rien réinstaller : un PC démarre dessus, on choisit le disque, il est entièrement réécrit. Voir plus bas. |
 | 😴 **Pas de veille** | Le Mac ne se met pas en veille pendant l’écriture. Pourcentage, vitesse et temps restant en direct. |
+
+## 🧽 EraseKEY : une clé pour effacer un disque
+
+Sous le disque vide, **« ou crée une EraseKEY »**. OsaBoot télécharge [ShredOS](https://github.com/PartialVolume/shredos.x86_64) (un petit Linux libre qui démarre en BIOS comme en UEFI et ouvre directement l’outil d’effacement **nwipe**), vérifie son empreinte SHA-1, puis en adapte une copie avant de l’écrire :
+
+- le menu de démarrage s’appelle **EraseKEY** et part au bout de 5 s ;
+- le clavier est en **AZERTY** dès le démarrage (option : QWERTY) ;
+- la clé elle-même est **retirée de la liste** des disques, elle ne peut pas s’effacer ;
+- un `LISEZMOI-EraseKEY.txt` en français est posé dessus.
+
+Sur le PC : démarrer sur la clé (F12, F11, F8 ou Échap), cocher le disque avec **Espace**, lancer avec **Majuscule + S**. Plusieurs méthodes (aléatoire vérifié par défaut, zéros, DoD, Gutmann…), et **E** pour l’effacement intégré au disque (Secure Erase), plus complet sur les SSD et NVMe. À la fin, **Entrée** enregistre sur la clé le journal et un rapport PDF par disque effacé.
+
+<p align="center"><img src=".github/assets/erasekey.png" width="420" alt="OsaBoot prêt à créer une EraseKEY"> <img src=".github/assets/erasekey-nwipe.png" width="420" alt="nwipe sur une EraseKEY : seul le disque du PC est proposé"></p>
 
 ## 🛡️ Sécurité
 
@@ -98,9 +112,14 @@ B=OsaBoot.app/Contents/MacOS/OsaBoot
 $B inspect ubuntu.iso
 OSABOOT_TEST_DISKS=${D#/dev/} $B flash test.img ${D#/dev/} --no-eject
 OSABOOT_TEST_DISKS=${D#/dev/} OSABOOT_SPLIT_AT=10000000 $B flash win.iso ${D#/dev/}   # force la découpe
+$B erasekey-image ~/Desktop/ek                          # prépare EraseKEY.img sans rien écrire
+OSABOOT_TEST_DISKS=${D#/dev/} $B erasekey ${D#/dev/}    # EraseKEY complète (disque de 200 Mo minimum)
 ```
 
+Pour voir l’EraseKEY démarrer : `qemu-system-x86_64 -m 1024 -drive if=none,id=k,format=raw,file=EraseKEY.img -device qemu-xhci -device usb-storage,drive=k,bootindex=0 -drive if=ide,format=raw,file=victime.img` (ajouter `-bios $(brew --prefix)/share/qemu/edk2-x86_64-code.fd` pour l’UEFI).
+
 - `OSABOOT_TEST_DISKS=disk14 OSABOOT_IMAGE=win.iso open OsaBoot.app` ouvre l’interface en mode test.
+- `OSABOOT_ERASEKEY=1` lance directement la préparation d’une EraseKEY.
 - `OSABOOT_DEMO=1` affiche une fausse ISO et une fausse clé (rien ne peut être écrit).
 - `OSABOOT_PREVIEW=confirm|working|done|failed` affiche directement un état (captures d’écran).
 
@@ -113,17 +132,19 @@ OSABOOT_TEST_DISKS=${D#/dev/} OSABOOT_SPLIT_AT=10000000 $B flash win.iso ${D#/de
 | Écrire | `/dev/rdiskN` ouvert directement, sinon par `/usr/libexec/authopen` (le descripteur revient par un socket Unix). Blocs de 4 Mo, puis `F_FULLFSYNC`. |
 | Vérifier | Relecture complète et SHA-256 (CryptoKit) comparé à celui de l’image. |
 | Clé Windows | `diskutil eraseDisk MS-DOS OSABOOT MBR`, Spotlight coupé sur la clé (`mdutil -i off`), copie par blocs de 8 Mo, `wimlib-imagex split` si besoin, nettoyage des fichiers `._*` de macOS, éjection. |
+| EraseKEY | Dernière release ShredOS via l’API GitHub (image `x86-64 … _lite.img` + `.sha1`), cache dans `~/Library/Caches/com.osalabs.osaboot/EraseKEY`. La copie est attachée sans montage (`hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount`), sa partition FAT montée par `diskutil mount`, les deux `grub.cfg` (BIOS et UEFI) réécrits (`loadkeys=fr shredos_exclude_boot_disc="yes"`), `/etc/shredos/shredos_exclude_disc` ajouté, puis écriture brute vérifiée comme une image normale. |
 | Interface | SwiftUI, `keyframeAnimator` pour les sauts de la mascotte, `TimelineView` + `Canvas` en pause hors écriture. |
 
 ## ⚠️ Limites
 
 - **Bêta.** L’écriture brute (avec vérification) et la préparation d’une clé Windows ont été testées sur une vraie clé USB, la découpe de `install.wim` sur un vrai fichier WIM. **Pas encore testé : démarrer un vrai PC sur une vraie ISO Windows 11.**
+- **EraseKEY** : testée de bout en bout dans QEMU (démarrage BIOS et UEFI, clé absente de la liste, disque effacé et vérifié, rapports PDF écrits sur la clé), pas encore sur un vrai PC. PC **x86 64 bits** seulement (pas les Mac Apple Silicon ni les PC ARM). Avec le Secure Boot actif, il faut le couper le temps de l’effacement.
 - Mac **Apple Silicon** seulement pour l’instant (wimlib embarqué en arm64).
 - Windows : PC en **UEFI** seulement, pas les vieux PC en BIOS.
 
 ## 📄 Licences
 
-Le code d’OsaBoot est public. L’app embarque **wimlib-imagex** ([wimlib](https://wimlib.net), GPLv3, © Eric Biggers), lancé comme programme séparé ; sa licence est copiée dans l’app (`Contents/Resources/wimlib-LICENCE-GPLv3.txt`) et sa source est sur wimlib.net.
+Le code d’OsaBoot est public. L’EraseKEY télécharge **ShredOS** (GPLv2, © PartialVolume et contributeurs, avec nwipe) depuis ses releases officielles : OsaBoot ne l’embarque pas et ne modifie que la configuration du menu de démarrage. L’app embarque **wimlib-imagex** ([wimlib](https://wimlib.net), GPLv3, © Eric Biggers), lancé comme programme séparé ; sa licence est copiée dans l’app (`Contents/Resources/wimlib-LICENCE-GPLv3.txt`) et sa source est sur wimlib.net.
 
 ---
 

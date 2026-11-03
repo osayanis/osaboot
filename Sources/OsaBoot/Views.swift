@@ -24,6 +24,9 @@ final class AppModel: ObservableObject {
     @Published var options = FlashOptions()
     @Published var confirming = false
     @Published var choosingDrive = false
+    /// Téléchargement de l'effaceur de l'EraseKEY en cours (0…1).
+    @Published var fetchingErase: Double?
+    private var eraseTask: Task<Void, Never>?
     /// Mode démo (captures) : une fausse ISO et une fausse clé, rien ne peut être écrit.
     var demo = false
     let drives = DriveList()
@@ -50,6 +53,7 @@ final class AppModel: ObservableObject {
 
     func open(_ url: URL) {
         guard !flasher.running else { return }
+        eraseTask?.cancel(); eraseTask = nil; fetchingErase = nil
         if case .done = flasher.phase { flasher.reset() }
         if case .failed = flasher.phase { flasher.reset() }
         inspecting = true
@@ -64,6 +68,29 @@ final class AppModel: ObservableObject {
                     case .failure(let e): self.image = nil; self.imageError = e.localizedDescription
                     }
                 }
+            }
+        }
+    }
+
+    /// L'EraseKEY : télécharge (ou reprend du cache) l'effaceur ShredOS, puis le choisit comme image.
+    @MainActor func makeEraseKey() {
+        guard !flasher.running, fetchingErase == nil else { return }
+        if case .done = flasher.phase { flasher.reset() }
+        if case .failed = flasher.phase { flasher.reset() }
+        imageError = nil
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { fetchingErase = 0 }
+        eraseTask = Task { @MainActor in
+            do {
+                let r = try await EraseKey.fetch { p in
+                    DispatchQueue.main.async { if self.fetchingErase != nil { self.fetchingErase = p } }
+                }
+                guard !Task.isCancelled else { return }
+                var img = try SourceImage.inspect(r.url)
+                img.eraseKey = r.version
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) { self.fetchingErase = nil; self.image = img }
+            } catch {
+                guard !Task.isCancelled else { return }
+                withAnimation { self.fetchingErase = nil; self.imageError = error.localizedDescription }
             }
         }
     }
@@ -174,7 +201,7 @@ struct ContentView: View {
             Text("OsaBoot").font(Theme.title(15))
             Text("v\(Updater.current)").font(.system(size: 11, weight: .medium).monospacedDigit()).foregroundStyle(.white.opacity(0.3))
             Spacer()
-            Text("Linux · Raspberry Pi · Windows").font(.system(size: 11.5, weight: .medium)).foregroundStyle(.white.opacity(0.3))
+            Text("Linux · Raspberry Pi · Windows · EraseKEY").font(.system(size: 11.5, weight: .medium)).foregroundStyle(.white.opacity(0.3))
         }
         .padding(.leading, 84).padding(.trailing, 24)
     }
@@ -216,7 +243,7 @@ struct MascotStage: View {
         case .idle: break
         }
         if dropping { return .excited }
-        if model.inspecting { return .curious }
+        if model.inspecting || model.fetchingErase != nil { return .curious }
         if model.imageError != nil || model.tooSmall { return .worried }
         if hoveringFlash && model.canFlash { return .excited }
         return .calm
@@ -251,18 +278,24 @@ struct MascotStage: View {
         }
         if dropping { return "Lâche-la, je l'attrape !" }
         if model.inspecting { return "Je regarde ce qu'il y a dedans…" }
+        if let p = model.fetchingErase { return p < 1 ? "Je télécharge l'effaceur (ShredOS)… \(Int(p * 100)) %" : "Je vérifie l'effaceur…" }
         if let e = model.imageError { return e }
         let key = model.drive.map { "« \($0.name) »" }
         guard let img = model.image else {
             if let key { return "J'ai vu ta clé \(key). Glisse-moi une image .iso ou .img !" }
             return "Salut ! Glisse-moi une image .iso ou .img, puis branche une clé USB."
         }
-        if model.drive == nil {
+        if img.eraseKey != nil {
+            if model.drive == nil { return "Une EraseKEY ! Branche la clé qui deviendra l'effaceur." }
+        } else if model.drive == nil {
             return img.isWindows ? "Windows, super ! Branche une clé d'au moins \(img.needed.bytes)." : "Parfait. Branche la clé USB à utiliser."
         }
         if let d = model.drive, !d.writable { return "\(key ?? "Cette clé") est protégée en écriture. Regarde s'il y a un petit verrou dessus." }
         if model.tooSmall { return "\(key ?? "La clé") est trop petite : il faut au moins \(img.needed.bytes)." }
         if hoveringFlash { return "Clique, je m'occupe de tout !" }
+        if img.eraseKey != nil {
+            return "Je transforme \(key ?? "la clé") en EraseKEY : un PC qui démarre dessus pourra effacer le disque de ton choix. On y va ?"
+        }
         if case .raw(false) = img.kind { return "Cette image n'a pas de table de partitions : elle risque de ne pas démarrer. Je peux quand même la copier." }
         return img.isWindows ? "Je prépare \(key ?? "la clé") en FAT32 et j'y mets Windows. On y va ?" : "Je copie l'image sur \(key ?? "la clé"), puis je vérifie tout. On y va ?"
     }
@@ -276,6 +309,7 @@ struct MascotStage: View {
         case "Ouverture de l'ISO": return "J'ouvre l'ISO…"
         case "Finalisation": return "Je range les derniers fichiers…"
         case "Éjection": return "J'éjecte la clé…"
+        case "Préparation de l'EraseKEY": return "J'adapte l'effaceur : menu, clavier, et ta clé retirée de la liste…"
         default:
             if stage.hasPrefix("Découpage") { return "install.wim est trop gros pour FAT32 : je le coupe en morceaux…" }
             return "Je prépare tout…"
@@ -341,10 +375,12 @@ struct DiscSlot: View {
         VStack(spacing: 14) {
             ZStack {
                 if let img = model.image {
-                    SpinningDisc(windows: img.isWindows, spinning: spinning)
+                    SpinningDisc(windows: img.isWindows, erase: img.eraseKey != nil, spinning: spinning)
                         .transition(.asymmetric(insertion: .scale(scale: 0.3).combined(with: .opacity).combined(with: .offset(x: -40)),
                                                 removal: .scale(scale: 0.6).combined(with: .opacity)))
                         .id(img.url)
+                } else if let p = model.fetchingErase {
+                    DownloadRing(fraction: p).transition(.opacity)
                 } else {
                     Circle()
                         .strokeBorder(.white.opacity(dropping ? 0.7 : hover ? 0.4 : 0.2), style: StrokeStyle(lineWidth: 2, dash: [7, 7]))
@@ -368,11 +404,14 @@ struct DiscSlot: View {
             .help("Choisir une image")
 
             VStack(spacing: 4) {
-                Text(model.image?.name ?? "Choisis une image")
+                Text(model.fetchingErase != nil ? "EraseKEY" : model.image?.name ?? "Choisis une image")
                     .font(.system(size: 14, weight: .bold)).lineLimit(1).truncationMode(.middle)
                 Text(subtitle).font(.system(size: 12)).foregroundStyle(Theme.dim).lineLimit(1)
                 if model.image != nil && !spinning {
                     Button("Changer") { model.pickImage() }.buttonStyle(LinkStyle()).padding(.top, 2)
+                } else if model.image == nil && model.fetchingErase == nil && !model.inspecting {
+                    Button("ou crée une EraseKEY") { model.makeEraseKey() }.buttonStyle(LinkStyle()).padding(.top, 2)
+                        .help("Une clé qui démarre un PC sur un petit outil pour effacer complètement le disque de ton choix. Rien n'est réinstallé.")
                 }
             }
             .frame(width: 220).frame(height: 58, alignment: .top)
@@ -380,7 +419,9 @@ struct DiscSlot: View {
     }
 
     private var subtitle: String {
+        if model.fetchingErase != nil { return "téléchargement de l'effaceur" }
         guard let img = model.image else { return "glisse-la ici ou clique" }
+        if let v = img.eraseKey { return "Effaceur de disque · ShredOS \(v)" }
         switch img.kind {
         case .windows(let w): return "Windows \(w.arch) · \(img.size.bytes)"
         case .raw: return "Image disque · \(img.size.bytes)"
@@ -391,12 +432,13 @@ struct DiscSlot: View {
 /// Le disque tourne pendant l'écriture (TimelineView en pause le reste du temps).
 struct SpinningDisc: View {
     let windows: Bool
+    var erase = false
     let spinning: Bool
     @State private var since = Date()
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 60, paused: !spinning)) { tl in
-            Disc(windows: windows)
+            Disc(windows: windows, erase: erase)
                 .rotationEffect(.degrees(spinning ? tl.date.timeIntervalSince(since) * 220 : 0))
         }
         .onChange(of: spinning) { s in if s { since = Date() } }
@@ -406,6 +448,7 @@ struct SpinningDisc: View {
 /// Un disque irisé, avec le logo de Windows au centre pour les ISO Windows.
 struct Disc: View {
     let windows: Bool
+    var erase = false
     var body: some View {
         ZStack {
             Circle().fill(AngularGradient(colors: [Color(white: 0.82), Theme.lilac, Color(white: 0.9), Theme.blue.opacity(0.8), Color(white: 0.85),
@@ -413,13 +456,37 @@ struct Disc: View {
             ForEach([10.0, 20.0, 30.0], id: \.self) { inset in Circle().stroke(.white.opacity(0.2), lineWidth: 0.8).padding(inset) }
             Circle().fill(LinearGradient(colors: [.white.opacity(0.45), .clear], startPoint: .topLeading, endPoint: .center)).blendMode(.screen)
             Circle().fill(Color(white: 0.1)).frame(width: 52, height: 52)
-            if windows { WindowsLogo().frame(width: 22, height: 22) }
+            if erase { Image(systemName: "eraser.fill").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.pink) }
+            else if windows { WindowsLogo().frame(width: 22, height: 22) }
             else { Image(systemName: "terminal.fill").font(.system(size: 18)).foregroundStyle(Theme.accent) }
             // un repère pour voir le disque tourner
             Capsule().fill(.white.opacity(0.55)).frame(width: 3, height: 14).offset(y: -50)
         }
         .frame(width: 140, height: 140)
         .shadow(color: .black.opacity(0.6), radius: 14, y: 8)
+    }
+}
+
+/// L'emplacement du disque pendant le téléchargement de l'effaceur : un anneau qui se remplit.
+struct DownloadRing: View {
+    let fraction: Double
+    var body: some View {
+        ZStack {
+            Circle().fill(.white.opacity(0.03))
+            Circle().stroke(.white.opacity(0.1), lineWidth: 4)
+            Circle().trim(from: 0, to: max(0.02, fraction))
+                .stroke(LinearGradient(colors: [Theme.lilac, Theme.pink], startPoint: .top, endPoint: .bottom), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.3), value: fraction)
+            VStack(spacing: 4) {
+                Image(systemName: fraction < 1 ? "arrow.down" : "checkmark.shield").font(.system(size: 22, weight: .semibold))
+                    .contentTransition(.symbolEffect(.replace))
+                Text("\(Int(fraction * 100)) %").font(.system(size: 12, weight: .heavy, design: .rounded)).monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+            .foregroundStyle(.white.opacity(0.8))
+        }
+        .frame(width: 140, height: 140)
     }
 }
 
@@ -648,13 +715,16 @@ struct BottomBar: View {
             case .running:
                 progress
             case .done, .failed:
-                Button(isFailed ? "Réessayer" : "Flasher une autre clé") { withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { flasher.reset() } }
+                Button(isFailed ? "Réessayer" : model.image?.eraseKey != nil ? "Créer une autre EraseKEY" : "Flasher une autre clé") { withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { flasher.reset() } }
                     .buttonStyle(BigButton(enabled: true)).keyboardShortcut(.defaultAction)
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
             case .idle:
                 options.frame(height: 32)
                 Button { model.flash() } label: {
-                    HStack(spacing: 8) { Image(systemName: "bolt.fill"); Text("Flasher") }
+                    HStack(spacing: 8) {
+                        Image(systemName: model.image?.eraseKey != nil ? "eraser.fill" : "bolt.fill")
+                        Text(model.image?.eraseKey != nil ? "Créer l'EraseKEY" : "Flasher")
+                    }
                 }
                 .buttonStyle(BigButton(enabled: model.canFlash))
                 .disabled(!model.canFlash)
@@ -677,6 +747,10 @@ struct BottomBar: View {
                         Label("install.wim sera découpé", systemImage: "scissors").font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.dim)
                             .help("\(w.install) fait \(w.installSize.bytes), plus que les 4 Go permis par FAT32 : il sera coupé en morceaux que Windows réunit tout seul.")
                     }
+                } else if img.eraseKey != nil {
+                    Chip(on: Binding(get: { model.options.keyboard == "fr" }, set: { model.options.keyboard = $0 ? "fr" : "us" }),
+                         title: "Clavier AZERTY", help: "Le clavier du PC à effacer, dès le démarrage. Décoche pour un clavier QWERTY.")
+                    Chip(on: $model.options.verify, title: "Vérifier après l'écriture", help: "Relit toute la clé et compare son empreinte SHA-256 à celle de l'image.")
                 } else {
                     Chip(on: $model.options.verify, title: "Vérifier après l'écriture", help: "Relit toute la clé et compare son empreinte SHA-256 à celle de l'image.")
                 }

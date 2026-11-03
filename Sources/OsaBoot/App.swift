@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Updater.shared.startAutomaticChecks()
         let env = ProcessInfo.processInfo.environment
         if let img = env["OSABOOT_IMAGE"] { model.open(URL(fileURLWithPath: img)) }
+        if env["OSABOOT_ERASEKEY"] != nil { model.makeEraseKey() }
         if env["OSABOOT_DEMO"] != nil {
             model.demo = true
             model.image = SourceImage(url: URL(fileURLWithPath: "/Win11_25H2_French_x64.iso"), size: 7_340_000_000,

@@ -23,8 +23,10 @@ struct SourceImage: Equatable {
     let url: URL
     let size: Int64
     let kind: Kind
+    /// Version de ShredOS quand c'est l'image d'une EraseKEY (voir EraseKey.swift).
+    var eraseKey: String? = nil
 
-    var name: String { url.lastPathComponent }
+    var name: String { eraseKey != nil ? "EraseKEY" : url.lastPathComponent }
     var isWindows: Bool { if case .windows = kind { return true }; return false }
     /// Place nécessaire sur la clé.
     var needed: Int64 { if case .windows(let w) = kind { return w.totalSize + 64 << 20 }; return size }

@@ -7,6 +7,8 @@ struct FlashOptions {
     /// Windows 11 sur un PC sans TPM 2.0, sans Secure Boot ou avec peu de RAM.
     var bypassChecks = false
     var eject = true
+    /// EraseKEY : disposition du clavier au démarrage (« fr » AZERTY, « us » QWERTY).
+    var keyboard = "fr"
 }
 
 /// Où en est l'écriture : étape, octets faits sur le total.
@@ -36,12 +38,24 @@ final class Engine {
             throw Fail("La clé est trop petite : il faut \(image.needed.bytes), elle fait \(drive.size.bytes).")
         }
         switch image.kind {
-        case .raw: try flashRaw()
+        case .raw where image.eraseKey != nil:
+            // une copie adaptée de l'image ShredOS, écrite telle quelle
+            onReport(Report(stage: "Préparation de l'EraseKEY", done: 0, total: image.size))
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("OsaBoot-EraseKEY-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let patched = try EraseKey.customize(image.url, keyboard: options.keyboard, into: dir)
+            try check()
+            try flashRaw(patched)
+        case .raw: try flashRaw(image.url)
         case .windows(let w): try flashWindows(w)
         }
         if options.eject {
             onReport(Report(stage: "Éjection", done: 1, total: 1))
             _ = try? Shell.run("/usr/sbin/diskutil", ["eject", drive.node])
+        }
+        if image.eraseKey != nil {
+            return "Branche la clé sur le PC à effacer et démarre dessus (F12, F11, F8 ou Échap). Choisis le disque avec Espace, puis Majuscule + S. La clé ne s'efface jamais elle-même."
         }
         return image.isWindows
             ? "Branche la clé sur le PC, allume-le et choisis-la au démarrage (F12, F11, F8 ou Échap selon la marque)."
@@ -52,7 +66,7 @@ final class Engine {
 
     private static let chunk = 4 << 20
 
-    private func flashRaw() throws {
+    private func flashRaw(_ url: URL) throws {
         onReport(Report(stage: "Préparation", done: 0, total: image.size))
         let un = try Shell.run("/usr/sbin/diskutil", ["unmountDisk", "force", drive.node])
         guard un.status == 0 else { throw Fail("Impossible de démonter la clé : \(un.err.trimmingCharacters(in: .whitespacesAndNewlines))") }
@@ -62,7 +76,7 @@ final class Engine {
         defer { buf.deallocate() }
 
         // écriture, en calculant l'empreinte de l'image au passage
-        let src = try FileHandle(forReadingFrom: image.url)
+        let src = try FileHandle(forReadingFrom: url)
         defer { try? src.close() }
         var hasher = SHA256()
         var offset: Int64 = 0
