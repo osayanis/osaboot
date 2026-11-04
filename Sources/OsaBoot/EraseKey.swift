@@ -101,11 +101,30 @@ enum EraseKey {
 
     /// Copie l'image officielle et l'adapte (menu, clavier, exclusion de la clé, mode d'emploi).
     /// Rend le chemin de la copie, à écrire telle quelle sur la clé.
+    /// L'image ShredOS ne marque pas sa partition « active » dans la table MBR. Beaucoup de PC
+    /// en mode BIOS (Legacy/CSM) ignorent alors la clé : « No bootable device ». On la marque,
+    /// ça ne change rien en UEFI.
+    static func markActive(_ image: URL) throws {
+        let h = try FileHandle(forUpdating: image)
+        defer { try? h.close() }
+        try h.seek(toOffset: 0)
+        guard let mbr = try h.read(upToCount: 512), mbr.count == 512, mbr[510] == 0x55, mbr[511] == 0xAA else {
+            throw Fail("L'image de l'effaceur n'a pas de table de partitions MBR.")
+        }
+        // 4 entrées de 16 octets à partir de 446 ; octet 0 = état, octet 4 = type
+        let entries = (0..<4).map { 446 + $0 * 16 }.filter { mbr[$0 + 4] != 0 }
+        guard let first = entries.first else { throw Fail("L'image de l'effaceur n'a pas de partition.") }
+        if entries.contains(where: { mbr[$0] == 0x80 }) { return }
+        try h.seek(toOffset: UInt64(first))
+        try h.write(contentsOf: Data([0x80]))
+    }
+
     static func customize(_ source: URL, keyboard: String, into dir: URL) throws -> URL {
         let fm = FileManager.default
         let out = dir.appendingPathComponent("EraseKEY.img")
         try? fm.removeItem(at: out)
         try fm.copyItem(at: source, to: out)
+        try markActive(out)
 
         let d = try Shell.plist("/usr/bin/hdiutil", ["attach", "-imagekey", "diskimage-class=CRawDiskImage", "-nomount", "-nobrowse", "-plist", out.path])
         let entities = d["system-entities"] as? [[String: Any]] ?? []
