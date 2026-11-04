@@ -8,7 +8,7 @@ import CryptoKit
 // démarre en BIOS comme en UEFI et ouvre directement nwipe, l'outil d'effacement (choix du disque,
 // méthode, vérification, rapport PDF enregistré sur la clé). OsaBoot télécharge l'image officielle,
 // vérifie son empreinte, puis en adapte une copie avant de l'écrire :
-// - le menu de démarrage s'appelle EraseKEY et attend 5 s au lieu de 15 ;
+// - le menu de démarrage s'appelle EraseKEY et reste caché (Échap pendant 1 s pour le voir) ;
 // - le clavier est en AZERTY (ou QWERTY) dès le démarrage ;
 // - la clé elle-même est exclue de la liste des disques (deux méthodes de ShredOS à la fois) ;
 // - un mode d'emploi en français est posé à la racine.
@@ -235,7 +235,8 @@ enum EraseKey {
                 l = l.replacingOccurrences(of: "ShredOS (nomodeset - display issues? try this)", with: "EraseKEY - ecran noir ? essaie celui-ci")
                     .replacingOccurrences(of: "\"ShredOS\"", with: "\"EraseKEY par OsaBoot - effacer un disque\"")
             }
-            if l.hasPrefix("set timeout=") { l = "set timeout=\"5\"" }
+            // menu caché : on arrive directement sur l'interface ; Échap pendant 1 s le montre
+            if l.hasPrefix("set timeout=") { l = "set timeout_style=hidden\nset timeout=\"1\"" }
             return l
         }
         guard launches > 0 else { throw Fail("Le menu de démarrage de ShredOS a changé : OsaBoot ne sait pas encore l'adapter.") }
@@ -254,7 +255,8 @@ enum EraseKey {
        (F12, F11, F8 ou Échap selon la marque). Si le Secure Boot bloque, désactive-le
        dans le BIOS le temps de l'effacement.
     2. L'écran EraseKEY s'ouvre tout seul et liste les disques du PC. Cette clé n'est
-       jamais proposée.
+       jamais proposée. Écran noir ? Redémarre sur la clé en appuyant sur Échap : un menu
+       apparaît, choisis « EraseKEY - ecran noir ? essaie celui-ci ».
     3. Flèches pour choisir le disque (Espace pour en cocher plusieurs), Entrée.
     4. Choisis la méthode : Conseillée (aléatoire, remise à zéro, relecture),
        Rapide (zéros, relecture) ou Renforcée (trois passes DoD).

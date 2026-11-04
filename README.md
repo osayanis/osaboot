@@ -66,7 +66,7 @@ Fond noir, animations douces, et environ **2 % de CPU** au repos : les animation
 
 Sous le disque vide, **« ou crée une EraseKEY »**. OsaBoot télécharge [ShredOS](https://github.com/PartialVolume/shredos.x86_64) (un petit Linux libre qui démarre en BIOS comme en UEFI et ouvre directement l’outil d’effacement **nwipe**), vérifie son empreinte SHA-1, puis en adapte une copie avant de l’écrire :
 
-- le menu de démarrage s’appelle **EraseKEY** et part au bout de 5 s ;
+- le menu de démarrage est caché : la clé arrive directement sur l’interface (Échap au démarrage pour le menu de secours « écran noir ») ;
 - le clavier est en **AZERTY** dès le démarrage (option : QWERTY) ;
 - la clé elle-même est **retirée de la liste** des disques, elle ne peut pas s’effacer ;
 - un `LISEZMOI-EraseKEY.txt` en français est posé dessus ;
