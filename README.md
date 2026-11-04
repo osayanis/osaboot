@@ -15,6 +15,8 @@ Et prépare aussi une **clé d’installation Windows 10 / 11** à partir d’un
 ![Statut](https://img.shields.io/badge/statut-b%C3%AAta-f472b6)
 ![OsaLabs](https://img.shields.io/badge/un%20projet-OsaLabs-b7a5ff)
 
+**[Installer avec OsaHUB](https://github.com/osayanis/osahub/releases/latest/download/OsaHUB.dmg)** · l’app qui installe et met à jour toute la suite Osa
+
 </div>
 
 <p align="center">
@@ -89,6 +91,8 @@ Sur le PC : démarrer sur la clé (F12, F11, F8 ou Échap). L’écran EraseKEY 
 - L’app ne tourne jamais en root. L’écriture passe par `authopen` : macOS demande ton mot de passe dans sa propre fenêtre.
 
 ## 📦 Installation
+
+> **Ou avec [OsaHUB](https://github.com/osayanis/osahub/releases/latest/download/OsaHUB.dmg)** : il installe OsaBoot en un clic, avec le reste de la suite Osa, et le garde à jour.
 
 1. Télécharge `OsaBoot.dmg` depuis les [Releases](../../releases) et glisse l’app dans **Applications**.
 2. Ouvre-la. L’app n’est pas notarisée : la première fois, fais **clic droit → Ouvrir**.
