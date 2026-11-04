@@ -465,6 +465,10 @@ func main() {
 		fmt.Println(preview(render, logfile, exclude))
 		return
 	}
+	// texte plus gros sur les écrans haute définition (console Linux seulement)
+	if !demo {
+		BiggerFont(int(os.Stdin.Fd()))
+	}
 	p := tea.NewProgram(newModel(logfile, exclude), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Println("erreur :", err)
