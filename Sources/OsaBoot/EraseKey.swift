@@ -101,44 +101,100 @@ enum EraseKey {
 
     /// Copie l'image officielle et l'adapte (menu, clavier, exclusion de la clé, mode d'emploi).
     /// Rend le chemin de la copie, à écrire telle quelle sur la clé.
-    /// L'image ShredOS ne marque pas sa partition « active » dans la table MBR. Beaucoup de PC
-    /// en mode BIOS (Legacy/CSM) ignorent alors la clé : « No bootable device ». On la marque,
-    /// ça ne change rien en UEFI.
-    static func markActive(_ image: URL) throws {
-        let h = try FileHandle(forUpdating: image)
-        defer { try? h.close() }
-        try h.seek(toOffset: 0)
-        guard let mbr = try h.read(upToCount: 512), mbr.count == 512, mbr[510] == 0x55, mbr[511] == 0xAA else {
+    // MARK: Image « standard »
+    //
+    // L'image de ShredOS a une partition non alignée (secteur 1263) et un FAT32 fait sur Linux
+    // (secteurs cachés à 0, partition non « active »). Certains PC (Dell Latitude 5175…) ne la
+    // voient pas du tout en UEFI. On refait donc une image comme celles de Rufus ou de Windows :
+    // partition active au secteur 2048, FAT32 formaté par macOS, mêmes fichiers. Le code de
+    // démarrage BIOS de GRUB (MBR + secteurs avant la partition) est gardé tel quel : il désigne
+    // la partition par son numéro, pas par sa position, donc il marche toujours.
+
+    static let partStart = 2048
+    static let partSectors = 160 * 2048   // 160 Mio : ShredOS (~100 Mio) + place pour les rapports
+
+    /// Adresse CHS (255 têtes, 63 secteurs) d'un secteur, pour la table MBR ; FE FF FF au-delà.
+    static func chs(_ lba: Int) -> [UInt8] {
+        let c = lba / (255 * 63), h = (lba / 63) % 255, sec = lba % 63 + 1
+        guard c < 1024 else { return [0xFE, 0xFF, 0xFF] }
+        return [UInt8(h), UInt8(sec | ((c >> 8) << 6)), UInt8(c & 0xFF)]
+    }
+
+    static func le32(_ v: Int) -> [UInt8] { (0..<4).map { UInt8((v >> (8 * $0)) & 0xFF) } }
+
+    /// Attache une image disque sans la monter ; renvoie (disque entier, première partition).
+    static func attach(_ url: URL, readOnly: Bool = false) throws -> (whole: String, part: String) {
+        var args = ["attach", "-imagekey", "diskimage-class=CRawDiskImage", "-nomount", "-nobrowse", "-plist"]
+        if readOnly { args.append("-readonly") }
+        let d = try Shell.plist("/usr/bin/hdiutil", args + [url.path])
+        let devs = (d["system-entities"] as? [[String: Any]] ?? []).compactMap { $0["dev-entry"] as? String }
+        guard let whole = devs.min(by: { $0.count < $1.count }) else { throw Fail("Impossible d'ouvrir l'image de l'effaceur.") }
+        guard let part = devs.filter({ $0 != whole }).sorted().first else {
+            _ = try? Shell.run("/usr/bin/hdiutil", ["detach", "-force", whole])
+            throw Fail("L'image de l'effaceur n'a pas la partition attendue.")
+        }
+        return (whole, part)
+    }
+
+    static func mount(_ part: String, at dir: URL, readOnly: Bool = false) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var args = ["mount"]
+        if readOnly { args.append("readOnly") }
+        let m = try Shell.run("/usr/sbin/diskutil", args + ["-mountOptions", "nobrowse", "-mountPoint", dir.path, part])
+        guard m.status == 0 else { throw Fail("Impossible de monter l'image de l'effaceur : \(m.err.trimmingCharacters(in: .whitespacesAndNewlines))") }
+    }
+
+    static func buildStandard(from source: URL, to out: URL, work dir: URL) throws {
+        let fm = FileManager.default
+        // 1. MBR et code de démarrage BIOS repris de ShredOS, nouvelle table de partitions
+        let src = try FileHandle(forReadingFrom: source)
+        let head = try src.read(upToCount: partStart * 512) ?? Data()
+        try src.close()
+        guard head.count == partStart * 512, head[510] == 0x55, head[511] == 0xAA else {
             throw Fail("L'image de l'effaceur n'a pas de table de partitions MBR.")
         }
-        // 4 entrées de 16 octets à partir de 446 ; octet 0 = état, octet 4 = type
-        let entries = (0..<4).map { 446 + $0 * 16 }.filter { mbr[$0 + 4] != 0 }
-        guard let first = entries.first else { throw Fail("L'image de l'effaceur n'a pas de partition.") }
-        if entries.contains(where: { mbr[$0] == 0x80 }) { return }
-        try h.seek(toOffset: UInt64(first))
-        try h.write(contentsOf: Data([0x80]))
+        let oldStart = Int(head[454]) | Int(head[455]) << 8 | Int(head[456]) << 16 | Int(head[457]) << 24
+        guard oldStart > 1, oldStart <= partStart else { throw Fail("L'image de l'effaceur n'a pas la forme attendue.") }
+        var lead = [UInt8](head.prefix(oldStart * 512)) + [UInt8](repeating: 0, count: (partStart - oldStart) * 512)
+        let entry: [UInt8] = [0x80] + chs(partStart) + [0x0C] + chs(partStart + partSectors - 1) + le32(partStart) + le32(partSectors)
+        lead.replaceSubrange(446..<510, with: entry + [UInt8](repeating: 0, count: 48))
+        try? fm.removeItem(at: out)
+        guard fm.createFile(atPath: out.path, contents: Data(lead)) else { throw Fail("Impossible de créer l'image de l'EraseKEY.") }
+        let h = try FileHandle(forWritingTo: out)
+        try h.truncate(atOffset: UInt64(partStart + partSectors) * 512)
+        try h.close()
+
+        // 2. FAT32 propre, fait par macOS (clusters de 512 octets comme l'original)
+        let new = try attach(out)
+        defer { _ = try? Shell.run("/usr/bin/hdiutil", ["detach", "-force", new.whole]) }
+        let raw = new.part.replacingOccurrences(of: "/dev/disk", with: "/dev/rdisk")
+        let f = try Shell.run("/sbin/newfs_msdos", ["-F", "32", "-c", "1", "-v", "SHREDOS", raw])
+        guard f.status == 0 else { throw Fail("Le formatage de l'EraseKEY a échoué : \(f.err.trimmingCharacters(in: .whitespacesAndNewlines))") }
+
+        // 3. les fichiers de ShredOS
+        let old = try attach(source, readOnly: true)
+        defer { _ = try? Shell.run("/usr/bin/hdiutil", ["detach", "-force", old.whole]) }
+        let from = dir.appendingPathComponent("source", isDirectory: true), to = dir.appendingPathComponent("cle", isDirectory: true)
+        try mount(old.part, at: from, readOnly: true)
+        defer { _ = try? Shell.run("/usr/sbin/diskutil", ["unmount", "force", from.path]) }
+        try mount(new.part, at: to)
+        defer { _ = try? Shell.run("/usr/sbin/diskutil", ["unmount", "force", to.path]) }
+        let c = try Shell.run("/usr/bin/ditto", ["--norsrc", "--noextattr", "--noqtn", "--noacl", from.path, to.path])
+        guard c.status == 0 else { throw Fail("La copie de ShredOS a échoué : \(c.err.trimmingCharacters(in: .whitespacesAndNewlines))") }
+        for junk in [".fseventsd", ".Spotlight-V100", ".Trashes"] { try? fm.removeItem(at: to.appendingPathComponent(junk)) }
+        sync()
     }
 
     static func customize(_ source: URL, keyboard: String, into dir: URL) throws -> URL {
         let fm = FileManager.default
         let out = dir.appendingPathComponent("EraseKEY.img")
         try? fm.removeItem(at: out)
-        try fm.copyItem(at: source, to: out)
-        try markActive(out)
+        try buildStandard(from: source, to: out, work: dir)
 
-        let d = try Shell.plist("/usr/bin/hdiutil", ["attach", "-imagekey", "diskimage-class=CRawDiskImage", "-nomount", "-nobrowse", "-plist", out.path])
-        let entities = d["system-entities"] as? [[String: Any]] ?? []
-        guard let whole = entities.compactMap({ $0["dev-entry"] as? String }).min(by: { $0.count < $1.count }) else {
-            throw Fail("Impossible d'ouvrir l'image de l'effaceur.")
-        }
-        defer { _ = try? Shell.run("/usr/bin/hdiutil", ["detach", "-force", whole]) }
-        guard let part = entities.first(where: { ($0["content-hint"] as? String ?? "").contains("FAT") })?["dev-entry"] as? String else {
-            throw Fail("L'image de l'effaceur n'a pas la partition attendue.")
-        }
+        let disk = try attach(out)
+        defer { _ = try? Shell.run("/usr/bin/hdiutil", ["detach", "-force", disk.whole]) }
         let mnt = dir.appendingPathComponent("montage", isDirectory: true)
-        try fm.createDirectory(at: mnt, withIntermediateDirectories: true)
-        let m = try Shell.run("/usr/sbin/diskutil", ["mount", "-mountOptions", "nobrowse", "-mountPoint", mnt.path, part])
-        guard m.status == 0 else { throw Fail("Impossible de monter l'image de l'effaceur : \(m.err.trimmingCharacters(in: .whitespacesAndNewlines))") }
+        try mount(disk.part, at: mnt)
         defer { _ = try? Shell.run("/usr/sbin/diskutil", ["unmount", "force", mnt.path]) }
 
         // l'interface EraseKEY ; sans elle (build de développement), c'est l'écran de nwipe

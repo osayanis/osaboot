@@ -67,7 +67,9 @@ final class Engine {
     private static let chunk = 4 << 20
 
     private func flashRaw(_ url: URL) throws {
-        onReport(Report(stage: "Préparation", done: 0, total: image.size))
+        // taille du fichier réellement écrit (l'EraseKEY n'a pas la taille de l'image d'origine)
+        let size = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? Int(image.size))
+        onReport(Report(stage: "Préparation", done: 0, total: size))
         // macOS ne doit rien monter sur la clé pendant la copie et la vérification
         let blocker = MountBlocker(drive.id)
         defer { withExtendedLifetime(blocker) {} }
@@ -96,7 +98,7 @@ final class Engine {
             if len > data.count { memset(buf + data.count, 0, len - data.count) }
             try writeAll(fd, buf, len, at: offset)
             offset += Int64(data.count)
-            onReport(Report(stage: "Écriture", done: offset, total: image.size))
+            onReport(Report(stage: "Écriture", done: offset, total: size))
         }
         guard fcntl(fd, F_FULLFSYNC) == 0 || fsync(fd) == 0 else { throw Fail("La clé n'a pas confirmé l'écriture.") }
         let expected = hasher.finalize()
@@ -105,9 +107,9 @@ final class Engine {
         var readBack = SHA256()
         var firstBad: Int64? = nil
         var pos: Int64 = 0
-        while pos < image.size {
+        while pos < size {
             try check()
-            let want = Int(min(Int64(Self.chunk), image.size - pos))
+            let want = Int(min(Int64(Self.chunk), size - pos))
             let len = (want + 4095) / 4096 * 4096
             var got = 0
             while got < len {
@@ -121,7 +123,7 @@ final class Engine {
             let i = Int(pos / Int64(Self.chunk))
             if firstBad == nil, i < chunks.count, SHA256.hash(data: piece) != chunks[i] { firstBad = pos }
             pos += Int64(want)
-            onReport(Report(stage: "Vérification", done: pos, total: image.size))
+            onReport(Report(stage: "Vérification", done: pos, total: size))
         }
         guard readBack.finalize() == expected else {
             let at = firstBad.map { " (première différence vers \($0.bytes))" } ?? ""
