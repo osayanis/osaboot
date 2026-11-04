@@ -9,6 +9,7 @@ var (
 	demo       = false
 	demoStart  time.Time
 	demoLength = 40 * time.Second
+	demoSpeed  = 412e6 // débit affiché en démo, vraisemblable pour un SSD (octets/s)
 )
 
 func demoDisks() []Disk {

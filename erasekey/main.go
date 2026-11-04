@@ -278,6 +278,9 @@ func (m model) mascotState() (Mood, string) {
 		return Busy, "J'efface... Laisse le PC allumé et la clé branchée. Tu peux aller boire un café."
 	case scrDone:
 		if m.allOK() {
+			if m.wipe != nil && len(m.wipe.Disks) > 1 {
+				return Happy, "C'est fait ! Les disques sont vides et vérifiés. Les rapports sont enregistrés sur la clé."
+			}
 			return Happy, "C'est fait ! Le disque est vide et vérifié. Le rapport est enregistré sur la clé."
 		}
 		return Worried, "Ça ne s'est pas bien passé. Le détail est dans le journal enregistré sur la clé."
@@ -466,9 +469,7 @@ func main() {
 		return
 	}
 	// texte plus gros sur les écrans haute définition (console Linux seulement)
-	if !demo {
-		BiggerFont(int(os.Stdin.Fd()))
-	}
+	BiggerFont(int(os.Stdin.Fd())) // sans effet hors console Linux
 	p := tea.NewProgram(newModel(logfile, exclude), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Println("erreur :", err)

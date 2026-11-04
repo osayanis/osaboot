@@ -98,6 +98,9 @@ func (w *Wipe) Overall() float64 {
 
 // Débit actuel (octets par seconde) depuis le début.
 func (w *Wipe) Speed() float64 {
+	if demo {
+		return demoSpeed
+	}
 	el := time.Since(w.Started).Seconds()
 	if el < 1 {
 		return 0
@@ -110,6 +113,13 @@ func (w *Wipe) Speed() float64 {
 }
 
 func (w *Wipe) Remaining() time.Duration {
+	if demo {
+		var total float64
+		for _, d := range w.Disks {
+			total += float64(d.Size) * w.Method.Work
+		}
+		return time.Duration((1 - w.Overall()) * total / demoSpeed * float64(time.Second))
+	}
 	p := w.Overall()
 	el := time.Since(w.Started)
 	if p < 0.01 || el < 5*time.Second {
@@ -129,6 +139,14 @@ func (w *Wipe) Cancel() {
 func (w *Wipe) Finish(err error, logfile string) {
 	w.Err = err
 	w.Ended = time.Now()
+	if demo {
+		// durée vraisemblable pour les disques de démo, au débit de démo
+		var total float64
+		for _, d := range w.Disks {
+			total += float64(d.Size) * w.Method.Work
+		}
+		w.Started = w.Ended.Add(-time.Duration(total / demoSpeed / float64(len(w.Disks)) * float64(time.Second)))
+	}
 	text := w.out.String()
 	if logfile != "" {
 		if b, e := os.ReadFile(logfile); e == nil {
