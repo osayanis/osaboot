@@ -9,7 +9,7 @@
 #   ./build-overlay.sh [sortie.cpio.gz]
 set -euo pipefail
 # chemin de sortie résolu avant de changer de dossier
-OUT="${1:-$(dirname "$0")/../build/erasekey-overlay.cpio.gz}"
+OUT="${1:-$(dirname "$0")/build/erasekey-overlay.cpio.gz}"
 mkdir -p "$(dirname "$OUT")"
 OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 cd "$(dirname "$0")"
@@ -20,7 +20,8 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/root/usr/bin"
 
 command -v go >/dev/null || { echo "Go est nécessaire (brew install go)."; exit 1; }
-VERSION="$(sed -n "s/.*ShortVersionString<\/key><string>\([^<]*\).*/\1/p" ../build.sh)"; VERSION="${VERSION:-dev}"
+# version : celle d'OsaBoot quand le dossier est dans OsaBoot, sinon OSA_VERSION ou « dev »
+VERSION="${OSA_VERSION:-$(sed -n "s/.*ShortVersionString<\/key><string>\([^<]*\).*/\1/p" ../build.sh 2>/dev/null)}"; VERSION="${VERSION:-dev}"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$WORK/root/usr/bin/osa-erase" .
 
 LAUNCHER_URL="https://raw.githubusercontent.com/PartialVolume/shredos.x86_64/$SHREDOS_TAG/board/shredos/fsoverlay/usr/bin/nwipe_launcher"

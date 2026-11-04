@@ -29,7 +29,12 @@ struct SourceImage: Equatable {
     var name: String { eraseKey != nil ? "EraseKEY" : url.lastPathComponent }
     var isWindows: Bool { if case .windows = kind { return true }; return false }
     /// Place nécessaire sur la clé.
-    var needed: Int64 { if case .windows(let w) = kind { return w.totalSize + 64 << 20 }; return size }
+    var needed: Int64 {
+        if case .windows(let w) = kind { return w.totalSize + 64 << 20 }
+        // l'EraseKEY est reconstruite : sa taille ne dépend pas de l'image ShredOS
+        if eraseKey != nil { return Int64(EraseKey.partStart + EraseKey.partSectors) * 512 }
+        return size
+    }
 
     static let fat32Max: Int64 = 4_294_967_295
     /// Au-delà, install.wim est découpé (tests : OSABOOT_SPLIT_AT abaisse le seuil).
